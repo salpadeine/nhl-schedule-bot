@@ -1,0 +1,21 @@
+name: NHL schedule
+
+on:
+  schedule:
+    # 16:00 по Москве = 13:00 UTC. GitHub иногда стартует на несколько минут позже.
+    - cron: "0 13 * * *"
+  workflow_dispatch:
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - run: python nhl_bot.py
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
