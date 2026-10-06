@@ -11,7 +11,6 @@ import requests
 MSK = ZoneInfo("Europe/Moscow")
 NHL_API = "https://api-web.nhle.com/v1/schedule/{date}"
 
-# Короткие русские названия. Аббревиатура остаётся, чтобы не путать NYR/NYI.
 TEAMS = {
     "ANA": "Анахайм",
     "BOS": "Бостон",
@@ -47,6 +46,43 @@ TEAMS = {
     "WSH": "Вашингтон",
 }
 
+# custom_emoji_id из пака https://t.me/addemoji/nhl_emoji
+# Пустая строка = без логотипа, пока id не вписан.
+TEAM_EMOJI = {
+    "ANA": "5289624869271548674",
+    "BOS": "5308006629218722288",
+    "BUF": "5310013096205493109",
+    "CAR": "5309858584757018813",
+    "CBJ": "5310168372158144305",
+    "CGY": "5310229811665314792",
+    "CHI": "5309943818383008756",
+    "COL": "5307852654641159018",
+    "DAL": "5310213533739261074",
+    "DET": "5310129953675682109",
+    "EDM": "5309857214662451573",
+    "FLA": "5307821533308134511",
+    "LAK": "5309907474369749141",
+    "MIN": "5310175046537323579",
+    "MTL": "5309893391171985824",
+    "NJD": "5309964021909168198",
+    "NSH": "5309846309740485867",
+    "NYI": "5310277816514781790",
+    "NYR": "5310277429967724551",
+    "OTT": "5307711934332674503",
+    "PHI": "5309759113314444494",
+    "PIT": "5309744987167006170",
+    "SEA": "5309761862093513430",
+    "SJS": "5309935808269001540",
+    "STL": "5309851944737578541",
+    "TBL": "5474153019543136376",
+    "TOR": "5310291530345356796",
+    "UTA": "5292199895439023589",
+    "VAN": "5309925899779447946",
+    "VGK": "5310055869784794040",
+    "WPG": "5310087772801868778",
+    "WSH": "5310233621301304614",
+}
+
 MONTHS = {
     1: "января",
     2: "февраля",
@@ -68,14 +104,25 @@ def team_label(team: dict) -> str:
     return TEAMS.get(abbr, team.get("commonName", {}).get("default", abbr))
 
 
+def esc(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def logo(abbr: str) -> str:
+    emoji_id = TEAM_EMOJI.get(abbr, "")
+    if not emoji_id:
+        return ""
+    return f'<tg-emoji emoji-id="{emoji_id}">🏒</tg-emoji> '
+
+
 def slate_date(now: datetime) -> str:
     """Дата слэйта НХЛ.
 
     В 16:00 МСК в Северной Америке ещё утро того же дня.
     Вечерние матчи ET — это уже ночь/утро следующего дня по Москве,
     но в API они лежат на дате НХЛ «сегодня».
-    После полуночи МСК берём вчерашнюю дату НХЛ, пока ночь не кончилась
-    (до 12:00 МСК), чтобы ручной запуск утром не пропускал слэйт.
+    После полуночи МСК берём вчерашнюю дату НХЛ до 12:00,
+    чтобы ручной запуск утром не пропускал слэйт.
     """
     if now.hour < 12:
         return (now - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -99,9 +146,11 @@ def build_message(now: datetime) -> str:
     for game in games:
         raw = game["startTimeUTC"].replace("Z", "+00:00")
         start = datetime.fromisoformat(raw).astimezone(MSK)
-        away = team_label(game["awayTeam"])
-        home = team_label(game["homeTeam"])
-        rows.append((start, f"{start:%H:%M}  {away} — {home}"))
+        away_abbr = game["awayTeam"].get("abbrev", "")
+        home_abbr = game["homeTeam"].get("abbrev", "")
+        away = esc(team_label(game["awayTeam"]))
+        home = esc(team_label(game["homeTeam"]))
+        rows.append((start, f"{start:%H:%M}  {logo(home_abbr)}{home} — {logo(away_abbr)}{away}"))
 
     rows.sort(key=lambda item: item[0])
     night = datetime.strptime(date, "%Y-%m-%d")
@@ -111,13 +160,18 @@ def build_message(now: datetime) -> str:
         return f"{title}\n\nИгр нет."
 
     lines = "\n".join(text for _, text in rows)
-    return f"{title}\n\n{lines}\n\nВремя московское."
+    return f"{title}\n\n{lines}"
 
 
 def send(token: str, chat_id: str, text: str) -> None:
     response = requests.post(
         f"https://api.telegram.org/bot{token}/sendMessage",
-        json={"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
+        json={
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        },
         timeout=30,
     )
     response.raise_for_status()
