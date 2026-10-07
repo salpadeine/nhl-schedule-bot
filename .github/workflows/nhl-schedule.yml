@@ -2,9 +2,12 @@ name: NHL schedule
 
 on:
   schedule:
-    # 16:00 по Москве = 13:00 UTC. GitHub иногда стартует на несколько минут позже.
-    - cron: "03 13 * * *"
+    # 16:03 по Москве = 13:03 UTC. GitHub часто стартует на часы позже.
+    - cron: "3 13 * * *"
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   post:
@@ -19,3 +22,11 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      - name: Remember posted slate
+        run: |
+          git config user.name "nhl-bot"
+          git config user.email "nhl-bot@users.noreply.github.com"
+          git add last_slate.txt
+          git diff --cached --quiet && exit 0
+          git commit -m "Mark NHL slate as posted"
+          git push
