@@ -4,12 +4,14 @@
 import os
 import sys
 from datetime import datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import requests
 
 MSK = ZoneInfo("Europe/Moscow")
 NHL_API = "https://api-web.nhle.com/v1/schedule/{date}"
+STATE_FILE = Path("last_slate.txt")
 
 TEAMS = {
     "ANA": "Анахайм",
@@ -184,9 +186,14 @@ def main() -> None:
     token = os.environ["TELEGRAM_TOKEN"]
     chat_id = os.environ["TELEGRAM_CHAT_ID"]
     now = datetime.now(MSK)
+    date = slate_date(now)
+    if STATE_FILE.exists() and STATE_FILE.read_text().strip() == date:
+        print(f"Слэйт {date} уже отправлен, повторно не пишу.")
+        return
     text = build_message(now)
     print(text)
     send(token, chat_id, text)
+    STATE_FILE.write_text(date + "\n")
 
 
 if __name__ == "__main__":
