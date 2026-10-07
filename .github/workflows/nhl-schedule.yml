@@ -3,7 +3,7 @@ name: NHL schedule
 on:
   schedule:
     # 16:00 по Москве = 13:00 UTC. GitHub иногда стартует на несколько минут позже.
-    - cron: "0 13 * * *"
+    - cron: "03 13 * * *"
   workflow_dispatch:
 
 jobs:
