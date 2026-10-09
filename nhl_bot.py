@@ -11,6 +11,7 @@ import requests
 
 MSK = ZoneInfo("Europe/Moscow")
 NHL_API = "https://api-web.nhle.com/v1/schedule/{date}"
+SCORE_API = "https://api-web.nhle.com/v1/score/{date}"
 STATE_FILE = Path("last_slate.txt")
 
 TEAMS = {
@@ -165,6 +166,58 @@ def build_message(now: datetime) -> str:
     return f"{title}\n\n{lines}"
 
 
+def fetch_scores(date: str) -> list[dict]:
+    response = requests.get(SCORE_API.format(date=date), timeout=30)
+    response.raise_for_status()
+    payload = response.json()
+    return [game for game in payload.get("games", []) if game.get("gameDate") == date]
+
+
+def ending(game: dict) -> str:
+    kind = game.get("gameOutcome", {}).get("lastPeriodType", "REG")
+    if kind == "OT":
+        return " ОТ"
+    if kind == "SO":
+        return " Б"
+    return ""
+
+
+def recap_link(game: dict) -> str:
+    path = game.get("threeMinRecap") or ""
+    if not path:
+        return ""
+    return f'<a href="https://www.nhl.com{esc(path)}">обзор</a>'
+
+
+def build_results(now: datetime) -> str:
+    date = slate_date(now)
+    games = fetch_scores(date)
+    rows = []
+    for game in games:
+        raw = game["startTimeUTC"].replace("Z", "+00:00")
+        start = datetime.fromisoformat(raw).astimezone(MSK)
+        away_abbr = game["awayTeam"].get("abbrev", "")
+        home_abbr = game["homeTeam"].get("abbrev", "")
+        away = esc(team_label(game["awayTeam"]))
+        home = esc(team_label(game["homeTeam"]))
+        state = game.get("gameState", "")
+        if state in {"OFF", "FINAL"} and "score" in game["homeTeam"]:
+            score = f"{game['homeTeam']['score']}:{game['awayTeam']['score']}{ending(game)}"
+            score = f"<tg-spoiler>{esc(score)}</tg-spoiler>"
+        else:
+            score = "ещё идёт"
+        link = recap_link(game)
+        tail = f" {link}" if link else ""
+        rows.append((start, f"{logo(home_abbr)}{home} — {logo(away_abbr)}{away}  {score}{tail}"))
+
+    rows.sort(key=lambda item: item[0])
+    night = datetime.strptime(date, "%Y-%m-%d")
+    title = f"🏒 Итоги, ночь {night.day} {MONTHS[night.month]}"
+    if not rows:
+        return f"{title}\n\nИгр не было."
+    return title + "\n\n" + "\n".join(text for _, text in rows)
+
+
 def send(token: str, chat_id: str, text: str) -> None:
     response = requests.post(
         f"https://api.telegram.org/bot{token}/sendMessage",
@@ -182,10 +235,7 @@ def send(token: str, chat_id: str, text: str) -> None:
         raise RuntimeError(body)
 
 
-def main() -> None:
-    token = os.environ["TELEGRAM_TOKEN"]
-    chat_id = os.environ["TELEGRAM_CHAT_ID"]
-    now = datetime.now(MSK)
+def post_schedule(token: str, chat_id: str, now: datetime) -> None:
     date = slate_date(now)
     if STATE_FILE.exists() and STATE_FILE.read_text().strip() == date:
         print(f"Слэйт {date} уже отправлен, повторно не пишу.")
@@ -194,6 +244,56 @@ def main() -> None:
     print(text)
     send(token, chat_id, text)
     STATE_FILE.write_text(date + "\n")
+
+
+def post_results(token: str, chat_id: str, now: datetime) -> None:
+    text = build_results(now)
+    print(text)
+    send(token, chat_id, text)
+
+
+def listen(token: str, chat_id: str) -> None:
+    requests.post(
+        f"https://api.telegram.org/bot{token}/setMyCommands",
+        json={"commands": [
+            {"command": "schedule", "description": "Расписание на ночь"},
+            {"command": "results", "description": "Итоги ночи со спойлером"},
+        ]},
+        timeout=30,
+    ).raise_for_status()
+    offset = 0
+    print("Слушаю /schedule и /results. Остановить: Ctrl+C.")
+    while True:
+        response = requests.get(
+            f"https://api.telegram.org/bot{token}/getUpdates",
+            params={"timeout": 50, "offset": offset, "allowed_updates": ["message"]},
+            timeout=60,
+        )
+        response.raise_for_status()
+        for update in response.json().get("result", []):
+            offset = update["update_id"] + 1
+            message = update.get("message") or {}
+            if str(message.get("chat", {}).get("id")) != str(chat_id):
+                continue
+            command = (message.get("text") or "").split()[0].split("@")[0]
+            now = datetime.now(MSK)
+            if command == "/results":
+                post_results(token, chat_id, now)
+            elif command == "/schedule":
+                post_schedule(token, chat_id, now)
+
+
+def main() -> None:
+    token = os.environ["TELEGRAM_TOKEN"]
+    chat_id = os.environ["TELEGRAM_CHAT_ID"]
+    mode = (sys.argv[1] if len(sys.argv) > 1 else os.environ.get("MODE", "schedule")).lower()
+    now = datetime.now(MSK)
+    if mode == "listen":
+        listen(token, chat_id)
+    elif mode == "results":
+        post_results(token, chat_id, now)
+    else:
+        post_schedule(token, chat_id, now)
 
 
 if __name__ == "__main__":
