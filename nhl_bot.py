@@ -166,7 +166,23 @@ def build_message(now: datetime) -> str:
     return f"{title}\n\n{lines}"
 
 
-def fetch_scores(date: str) -> list[dict]:
+def results_date(now: datetime) -> str:
+    """Итоги прошлого слэйта, пока не начался первый матч нового.
+
+    Расписание в полдень уже смотрит на сегодняшнюю ночь.
+    Итоги остаются на вчера, пока startTimeUTC нового слэйта в будущем.
+    """
+    current = slate_date(now)
+    games = fetch_scores(current) or fetch_games(current)
+    starts = []
+    for game in games:
+        raw = game.get("startTimeUTC", "").replace("Z", "+00:00")
+        if raw:
+            starts.append(datetime.fromisoformat(raw).astimezone(MSK))
+    if not starts or min(starts) > now:
+        previous = datetime.strptime(current, "%Y-%m-%d") - timedelta(days=1)
+        return previous.strftime("%Y-%m-%d")
+    return current
     response = requests.get(SCORE_API.format(date=date), timeout=30)
     response.raise_for_status()
     payload = response.json()
@@ -190,7 +206,7 @@ def recap_link(game: dict) -> str:
 
 
 def build_results(now: datetime) -> str:
-    date = slate_date(now)
+    date = results_date(now)
     games = fetch_scores(date)
     rows = []
     for game in games:
