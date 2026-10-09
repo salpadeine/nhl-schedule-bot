@@ -183,6 +183,9 @@ def results_date(now: datetime) -> str:
         previous = datetime.strptime(current, "%Y-%m-%d") - timedelta(days=1)
         return previous.strftime("%Y-%m-%d")
     return current
+
+
+def fetch_scores(date: str) -> list[dict]:
     response = requests.get(SCORE_API.format(date=date), timeout=30)
     response.raise_for_status()
     payload = response.json()
