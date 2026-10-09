@@ -5,6 +5,14 @@ on:
     # 16:03 по Москве = 13:03 UTC. GitHub часто стартует на часы позже.
     - cron: "3 13 * * *"
   workflow_dispatch:
+    inputs:
+      post:
+        description: Что отправить
+        type: choice
+        default: schedule
+        options:
+          - schedule
+          - results
 
 permissions:
   contents: write
@@ -18,7 +26,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install requests
-      - run: python nhl_bot.py
+      - run: python nhl_bot.py ${{ inputs.post || 'schedule' }}
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
