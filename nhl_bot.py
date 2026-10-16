@@ -2,6 +2,7 @@
 """Постит в Telegram расписание НХЛ на текущую ночь по московскому времени."""
 
 import os
+import re
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -13,6 +14,7 @@ MSK = ZoneInfo("Europe/Moscow")
 NHL_API = "https://api-web.nhle.com/v1/schedule/{date}"
 SCORE_API = "https://api-web.nhle.com/v1/score/{date}"
 STATE_FILE = Path("last_slate.txt")
+VIDEO_STATE = Path("posted_videos.txt")
 
 TEAMS = {
     "ANA": "Анахайм",
@@ -163,7 +165,88 @@ def build_message(now: datetime) -> str:
         return f"{title}\n\nИгр нет."
 
     lines = "\n".join(text for _, text in rows)
+    extra = new_video_block()
+    if extra:
+        lines += "\n\n" + extra
     return f"{title}\n\n{lines}"
+
+
+TOPIC_PAGES = (
+    "https://www.nhl.com/video/topic/top-plays/",
+    "https://www.nhl.com/video/topic/weird-nhl/",
+)
+VIDEO_KINDS = (
+    ("Weird NHL", re.compile(r"weird-nhl", re.I)),
+    ("Top Saves", re.compile(r"top-saves|best-saves", re.I)),
+    ("Top Goals", re.compile(r"top-goals|best-goals", re.I)),
+    ("Top Hits", re.compile(r"top-hits|top-nhl-hits|best-hits", re.I)),
+)
+
+
+def video_title(slug: str) -> str:
+    name = re.sub(r"-\d{10,}$", "", slug)
+    name = name.replace("-", " ")
+    name = re.sub(r"\bnhl\b", "NHL", name, flags=re.I)
+    name = re.sub(r"\bvol\b", "Vol.", name, flags=re.I)
+    name = re.sub(r"(\d{4}) (\d{2})\b", r"\1-\2", name)
+    name = re.sub(r"\s+", " ", name).strip()
+    return name[:1].upper() + name[1:] if name else slug
+
+
+def topic_videos(url: str) -> list[tuple[str, str]]:
+    response = requests.get(url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+    response.raise_for_status()
+    found = []
+    seen = set()
+    for path in re.findall(r'href="(/video/topic/[^"#?]+\d{10,})"', response.text):
+        if path in seen:
+            continue
+        seen.add(path)
+        slug = path.rstrip("/").rsplit("/", 1)[-1]
+        found.append((video_title(slug), "https://www.nhl.com" + path))
+    return found
+
+
+def seen_videos() -> set[str]:
+    if not VIDEO_STATE.exists():
+        return set()
+    return {line.strip() for line in VIDEO_STATE.read_text().splitlines() if line.strip()}
+
+
+def remember_videos(urls: list[str]) -> None:
+    known = seen_videos()
+    known.update(urls)
+    VIDEO_STATE.write_text("\n".join(sorted(known)) + "\n")
+
+
+def latest_videos() -> list[tuple[str, str]]:
+    """Самый свежий ролик каждой подборки. Страница уже отдаёт новые сверху."""
+    videos = []
+    for page in TOPIC_PAGES:
+        videos.extend(topic_videos(page))
+    picked = []
+    for _, pattern in VIDEO_KINDS:
+        for title, url in videos:
+            if pattern.search(title) or pattern.search(url):
+                picked.append((title, url))
+                break
+    return picked
+
+
+def new_video_block() -> str:
+    try:
+        latest = latest_videos()
+    except requests.RequestException:
+        return ""
+    if not VIDEO_STATE.exists():
+        # Первый запуск только запоминает то, что уже лежит на сайте.
+        remember_videos([url for _, url in latest])
+        return ""
+    fresh = [(title, url) for title, url in latest if url not in seen_videos()]
+    if not fresh:
+        return ""
+    lines = [f"• <a href=\"{esc(url)}\">{esc(title)}</a>" for title, url in fresh]
+    return "А пока можно посмотреть свежее:\n" + "\n".join(lines)
 
 
 def results_date(now: datetime) -> str:
@@ -263,6 +346,10 @@ def post_schedule(token: str, chat_id: str, now: datetime) -> None:
     print(text)
     send(token, chat_id, text)
     STATE_FILE.write_text(date + "\n")
+    try:
+        remember_videos([url for _, url in latest_videos()])
+    except requests.RequestException:
+        pass
 
 
 def post_results(token: str, chat_id: str, now: datetime) -> None:
