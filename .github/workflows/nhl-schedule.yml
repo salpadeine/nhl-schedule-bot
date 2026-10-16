@@ -34,7 +34,7 @@ jobs:
         run: |
           git config user.name "nhl-bot"
           git config user.email "nhl-bot@users.noreply.github.com"
-          git add last_slate.txt
+          git add last_slate.txt posted_videos.txt
           git diff --cached --quiet && exit 0
           git commit -m "Mark NHL slate as posted"
           git push
