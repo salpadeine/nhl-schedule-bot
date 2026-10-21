@@ -184,11 +184,43 @@ VIDEO_KINDS = (
 
 
 def video_title(slug: str) -> str:
-    name = re.sub(r"-\d{10,}$", "", slug)
-    name = name.replace("-", " ")
-    name = re.sub(r"\bnhl\b", "NHL", name, flags=re.I)
-    name = re.sub(r"\bvol\b", "Vol.", name, flags=re.I)
-    name = re.sub(r"(\d{4}) (\d{2})\b", r"\1-\2", name)
+    """Русское название из адреса ролика. Незнакомый адрес оставляем читаемым."""
+    raw = re.sub(r"-\d{10,}$", "", slug)
+    if match := re.search(r"weird-nhl-vol-(\d+)", raw, re.I):
+        return f"Weird NHL, выпуск {match.group(1)}"
+
+    kind = "Подборка"
+    if re.search(r"top-saves|best-saves", raw, re.I):
+        kind = "Лучшие сейвы"
+    elif re.search(r"top-goals|best-goals", raw, re.I):
+        kind = "Лучшие голы"
+    elif re.search(r"top-hits|top-nhl-hits|best-hits", raw, re.I):
+        kind = "Лучшие силовые"
+
+    if match := re.search(r"weeks?-(\d+)(?:-(\d+))?", raw, re.I):
+        span = match.group(1) if not match.group(2) else f"{match.group(1)}–{match.group(2)}"
+        word = "неделя" if not match.group(2) else "недели"
+        return f"{kind}, {word} {span}"
+    if match := re.search(r"from-(january|february|march|april|may|june|july|august|september|october|november|december)", raw, re.I):
+        months = {
+            "january": "январь", "february": "февраль", "march": "март",
+            "april": "апрель", "may": "май", "june": "июнь",
+            "july": "июль", "august": "август", "september": "сентябрь",
+            "october": "октябрь", "november": "ноябрь", "december": "декабрь",
+        }
+        return f"{kind} за {months[match.group(1).lower()]}"
+    if re.search(r"pre-?season|preason", raw, re.I):
+        year = re.search(r"(20\d{2})", raw)
+        return f"{kind} предсезонки" + (f" {year.group(1)}" if year else "")
+    if re.search(r"stanley-cup|playoffs", raw, re.I):
+        year = re.search(r"(20\d{2})", raw)
+        return f"{kind} плей-офф" + (f" {year.group(1)}" if year else "")
+    if match := re.search(r"(20\d{2})-(\d{2})", raw):
+        return f"{kind} сезона {match.group(1)}-{match.group(2)}"
+    if kind != "Подборка":
+        return kind
+
+    name = raw.replace("-", " ")
     name = re.sub(r"\s+", " ", name).strip()
     return name[:1].upper() + name[1:] if name else slug
 
